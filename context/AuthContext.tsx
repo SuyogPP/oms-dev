@@ -25,7 +25,8 @@ interface AuthContextType {
 
   login: (
     username: string,
-    password: string
+    password: string,
+    confirmRevokeOldest?: boolean
   ) => Promise<void>;
 
   logout: () => Promise<void>;
@@ -55,11 +56,24 @@ export function AuthProvider({
     useState(true);
 
   /**
+   * Sync API client headers with user state
+   */
+  // useEffect(() => {
+  //   if (user) {
+  //     api.defaults.headers.common["x-user-id"] = user.userId;
+  //     api.defaults.headers.common["x-login-session-id"] = user.loginSessionId;
+  //   } else {
+  //     delete api.defaults.headers.common["x-user-id"];
+  //     delete api.defaults.headers.common["x-login-session-id"];
+  //   }
+  // }, [user]);
+
+  /**
    * Prevent multiple refreshes
    * running simultaneously
    */
   const refreshInProgress =
-    useRef(false);
+    useRef<Promise<void> | null>(null);
 
   /**
    * Silent Refresh
@@ -70,23 +84,21 @@ export function AuthProvider({
       if (
         refreshInProgress.current
       ) {
-        return;
+        return refreshInProgress.current;
       }
 
-      try {
+      const promise = (async () => {
+        try {
+          await api.post(
+            "/auth/refresh"
+          );
+        } finally {
+          refreshInProgress.current = null;
+        }
+      })();
 
-        refreshInProgress.current =
-          true;
-
-        await api.post(
-          "/auth/refresh"
-        );
-
-      } finally {
-
-        refreshInProgress.current =
-          false;
-      }
+      refreshInProgress.current = promise;
+      return promise;
     };
 
   /**
@@ -175,46 +187,57 @@ export function AuthProvider({
   /**
    * Login
    */
-  const login =
-    async (
-      username: string,
-      password: string
-    ) => {
-
-      const response =
-        await api.post(
-          "/auth/login",
-          {
-            username,
-            password,
+    const login =
+      async (
+        username: string,
+        password: string,
+        confirmRevokeOldest?: boolean
+      ) => {
+  
+        try {
+          const response =
+            await api.post(
+              "/auth/login",
+              {
+                username,
+                password,
+                confirmRevokeOldest
+              }
+            );
+  
+          if (
+            !response.data.success
+          ) {
+  
+            throw new Error(
+              response.data.message ??
+              "Login failed"
+            );
           }
-        );
-
-      if (
-        !response.data.success
-      ) {
-
-        throw new Error(
-          response.data.message ??
-          "Login failed"
-        );
-      }
-
-      /**
-       * Login API already set:
-       *
-       * oms_access_token
-       * oms_refresh_token
-       * oms_device_id
-       */
-
-      const session =
-        await getAuthSession();
-
-      setUser(
-        session !== "REFRESH_REQUIRED" ? session : null
-      );
-    };
+  
+          /**
+           * Login API already set:
+           *
+           * oms_access_token
+           * oms_refresh_token
+           * oms_device_id
+           */
+  
+          const session =
+            await getAuthSession();
+  
+          setUser(
+            session !== "REFRESH_REQUIRED" ? session : null
+          );
+        } catch (error: any) {
+          if (error.response?.data?.code === "CONFIRM_REVOKE_OLDEST") {
+            const customError = new Error("CONFIRM_REVOKE_OLDEST");
+            (customError as any).code = "CONFIRM_REVOKE_OLDEST";
+            throw customError;
+          }
+          throw new Error(error.response?.data?.message || error.message || "Login failed");
+        }
+      };
 
   /**
    * Logout
@@ -327,46 +350,7 @@ export function AuthProvider({
 
   }, []);
 
-  /**
-   * Optional:
-   * Refresh when tab
-   * becomes visible
-   */
-  useEffect(() => {
 
-    const handleVisibility =
-      async () => {
-
-        if (
-          document.visibilityState !==
-          "visible"
-        ) {
-          return;
-        }
-
-        try {
-
-          await refreshSession();
-
-        } catch {
-          // ignore
-        }
-      };
-
-    document.addEventListener(
-      "visibilitychange",
-      handleVisibility
-    );
-
-    return () => {
-
-      document.removeEventListener(
-        "visibilitychange",
-        handleVisibility
-      );
-    };
-
-  }, []);
 
   return (
     <AuthContext.Provider

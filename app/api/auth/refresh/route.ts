@@ -62,7 +62,7 @@ export async function POST(
         response.cookies.set("oms_access_token", result.accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
+            sameSite: "lax",
             path: "/",
             maxAge: SECURITY.ACCESS_TOKEN_COOKIE_MAX_AGE,
         });
@@ -71,7 +71,7 @@ export async function POST(
         response.cookies.set("oms_refresh_token", result.refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
+            sameSite: "lax",
             path: "/",
             maxAge: SECURITY.REFRESH_TOKEN_COOKIE_MAX_AGE,
         });
@@ -79,6 +79,20 @@ export async function POST(
         return response;
 
     } catch (error: any) {
+
+        // Concurrent refresh (React StrictMode / Multiple tabs)
+        // Return 200 OK so the client interceptor resolves and uses the new cookies
+        if (error?.message === "CONCURRENT_REFRESH") {
+            return NextResponse.json(
+                {
+                    success: true,
+                    message: "Concurrent refresh handled"
+                },
+                {
+                    status: 200
+                }
+            );
+        }
 
         // Replay attack detection — return 403 Forbidden
         if (error?.message === "REFRESH_TOKEN_REPLAY") {

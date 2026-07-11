@@ -42,7 +42,8 @@ export async function POST(
                 body.password,
                 ipAddress,
                 userAgent,
-                deviceFingerprint
+                deviceFingerprint,
+                body.confirmRevokeOldest
             );
 
         // Build response WITHOUT tokens in the body (security requirement)
@@ -51,20 +52,18 @@ export async function POST(
             session: result.session,
         });
 
-        // Set access token as HttpOnly cookie
         response.cookies.set("oms_access_token", result.accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
+            sameSite: "lax",
             path: "/",
             maxAge: SECURITY.ACCESS_TOKEN_COOKIE_MAX_AGE,
         });
 
-        // Set refresh token as HttpOnly cookie
         response.cookies.set("oms_refresh_token", result.refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
+            sameSite: "lax",
             path: "/",
             maxAge: SECURITY.REFRESH_TOKEN_COOKIE_MAX_AGE,
         });
@@ -74,17 +73,12 @@ export async function POST(
             deviceFingerprint,
             {
                 httpOnly: true,
-                secure: true,
-                sameSite: "strict",
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "lax",
                 path: "/",
                 maxAge: SECURITY.DEVICE_ID_COOKIE_MAX_AGE
             }
         );
-
-
-
-
-
 
         return response;
 
@@ -115,6 +109,27 @@ export async function POST(
                 {
                     status: 429,
                 }
+            );
+        }
+
+        if (error.message === "MAX_SESSIONS_REACHED") {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Maximum number of sessions reached, please contact your admin."
+                },
+                { status: 403 }
+            );
+        }
+
+        if (error.message === "CONFIRM_REVOKE_OLDEST") {
+            return NextResponse.json(
+                {
+                    success: false,
+                    code: "CONFIRM_REVOKE_OLDEST",
+                    message: "Confirmation required to revoke oldest session"
+                },
+                { status: 409 }
             );
         }
 
